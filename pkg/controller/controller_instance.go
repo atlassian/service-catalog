@@ -249,11 +249,6 @@ func (c *controller) reconcileServiceInstance(instance *v1beta1.ServiceInstance)
 func (c *controller) reconcileServiceInstanceAdd(instance *v1beta1.ServiceInstance) error {
 	pcb := pretty.NewContextBuilder(pretty.ServiceInstance, instance.Namespace, instance.Name)
 
-	if isServiceInstanceFailed(instance) {
-		glog.V(4).Info(pcb.Message("Not processing event because status showed that it has failed"))
-		return nil
-	}
-
 	if instance.Status.ReconciledGeneration == instance.Generation {
 		glog.V(4).Info(pcb.Message("Not processing event because reconciled generation showed there is no work to do"))
 		return nil
@@ -352,11 +347,6 @@ func (c *controller) reconcileServiceInstanceAdd(instance *v1beta1.ServiceInstan
 // or parameters of a service instance.
 func (c *controller) reconcileServiceInstanceUpdate(instance *v1beta1.ServiceInstance) error {
 	pcb := pretty.NewContextBuilder(pretty.ServiceInstance, instance.Namespace, instance.Name)
-
-	if isServiceInstanceFailed(instance) {
-		glog.V(4).Info(pcb.Message("Not processing event because status showed that it has failed"))
-		return nil
-	}
 
 	if instance.Status.ReconciledGeneration == instance.Generation {
 		glog.V(4).Info(pcb.Message("Not processing event because reconciled generation showed there is no work to do"))
@@ -702,18 +692,6 @@ func (c *controller) pollServiceInstance(instance *v1beta1.ServiceInstance) erro
 		err := fmt.Errorf(`Got invalid state in LastOperationResponse: %q`, response.State)
 		return c.handleServiceInstancePollingError(instance, err)
 	}
-}
-
-// isServiceInstanceFailed returns whether the instance has a failed condition with
-// status true.
-func isServiceInstanceFailed(instance *v1beta1.ServiceInstance) bool {
-	for _, condition := range instance.Status.Conditions {
-		if condition.Type == v1beta1.ServiceInstanceConditionFailed && condition.Status == v1beta1.ConditionTrue {
-			return true
-		}
-	}
-
-	return false
 }
 
 // processServiceInstancePollingFailureRetryTimeout marks the instance as having
