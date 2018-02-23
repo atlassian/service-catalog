@@ -2,10 +2,10 @@ apiVersion: servicecatalog.k8s.io/v1beta1
 kind: ServiceInstance
 metadata:
   name: ups-instance
-  namespace: test-ns
+  namespace: user-provided-service
 spec:
   clusterServiceClassExternalName: user-provided-service
   clusterServicePlanExternalName: default
   parameters:
     param-1: value-1
-    param-2: value-2
+    param-2: value-3

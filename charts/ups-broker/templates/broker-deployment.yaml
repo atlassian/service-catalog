@@ -25,6 +25,7 @@ spec:
         image: {{ .Values.image }}
         imagePullPolicy: {{ .Values.imagePullPolicy }}
         args:
+        - -logtostderr=true
         - --port
         - "8080"
         {{- if .Values.tls.cert}}

@@ -27,6 +27,26 @@ import (
 	"github.com/kubernetes-incubator/service-catalog/contrib/pkg/brokerapi"
 )
 
+const rawParameterSchema = `
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "properties": {
+    "credentials": {
+      "type": "object"
+    }
+  },
+  "type": "object"
+}
+`;
+
+var parameterSchema interface{}
+
+func init() {
+	if err := json.Unmarshal([]byte(rawParameterSchema), &parameterSchema); err != nil {
+		panic(err)
+	}
+}
+
 type errNoSuchInstance struct {
 	instanceID string
 }
@@ -65,6 +85,13 @@ func (c *userProvidedController) Catalog() (*brokerapi.Catalog, error) {
 					Name:        "default",
 					ID:          "86064792-7ea2-467b-af93-ac9694d96d52",
 					Description: "Sample plan description",
+					Schemas: &brokerapi.Schemas{
+						ServiceInstances: &brokerapi.ServiceInstanceSchema{
+							Create: &brokerapi.InputParameters{
+								Parameters: parameterSchema,
+							},
+						},
+					},
 					Free:        true,
 				}, {
 					Name:        "premium",
@@ -74,7 +101,7 @@ func (c *userProvidedController) Catalog() (*brokerapi.Catalog, error) {
 				},
 				},
 				Bindable:       true,
-				PlanUpdateable: true,
+				PlanUpdateable: false,
 			},
 			{
 				Name:        "user-provided-service-single-plan",
@@ -85,11 +112,18 @@ func (c *userProvidedController) Catalog() (*brokerapi.Catalog, error) {
 						Name:        "default",
 						ID:          "96064792-7ea2-467b-af93-ac9694d96d52",
 						Description: "Sample plan description",
+						Schemas: &brokerapi.Schemas{
+							ServiceInstances: &brokerapi.ServiceInstanceSchema{
+								Create: &brokerapi.InputParameters{
+									Parameters: parameterSchema,
+								},
+							},
+						},
 						Free:        true,
 					},
 				},
 				Bindable:       true,
-				PlanUpdateable: true,
+				PlanUpdateable: false,
 			},
 		},
 	}, nil
