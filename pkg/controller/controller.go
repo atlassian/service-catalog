@@ -83,6 +83,7 @@ func NewController(
 	brokerClientCreateFunc osb.CreateFunc,
 	brokerRelistInterval time.Duration,
 	osbAPIPreferredVersion string,
+	orphanMitigation bool,
 	recorder record.EventRecorder,
 	reconciliationRetryDuration time.Duration,
 	operationPollingMaximumBackoffDuration time.Duration,
@@ -94,6 +95,7 @@ func NewController(
 		serviceCatalogClient:        serviceCatalogClient,
 		brokerRelistInterval:        brokerRelistInterval,
 		OSBAPIPreferredVersion:      osbAPIPreferredVersion,
+		orphanMitigation:            orphanMitigation,
 		recorder:                    recorder,
 		reconciliationRetryDuration: reconciliationRetryDuration,
 		clusterServiceBrokerQueue:   workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(pollingStartInterval, operationPollingMaximumBackoffDuration), "cluster-service-broker"),
@@ -194,6 +196,7 @@ type controller struct {
 	servicePlanLister           listers.ServicePlanLister
 	brokerRelistInterval        time.Duration
 	OSBAPIPreferredVersion      string
+	orphanMitigation			bool
 	recorder                    record.EventRecorder
 	reconciliationRetryDuration time.Duration
 	clusterServiceBrokerQueue   workqueue.RateLimitingInterface
