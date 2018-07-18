@@ -2384,6 +2384,10 @@ func (c *controller) processTemporaryProvisionFailure(instance *v1beta1.ServiceI
 // ServiceInstance that hit a temporary or a terminal failure during provision
 // reconciliation.
 func (c *controller) processProvisionFailure(instance *v1beta1.ServiceInstance, readyCond, failedCond *v1beta1.ServiceInstanceCondition, shouldMitigateOrphan bool) error {
+	// If the user doesn't want any orphan mitigation...
+	if c.orphanMitigation == false {
+		shouldMitigateOrphan = false
+	}
 	c.recorder.Event(instance, corev1.EventTypeWarning, readyCond.Reason, readyCond.Message)
 	setServiceInstanceCondition(instance, v1beta1.ServiceInstanceConditionReady, readyCond.Status, readyCond.Reason, readyCond.Message)
 
