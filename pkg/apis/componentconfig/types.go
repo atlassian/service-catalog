@@ -95,6 +95,10 @@ type ControllerManagerConfiguration struct {
 	// enableContentionProfiling enables lock contention profiling, if enableProfiling is true.
 	EnableContentionProfiling bool
 
+	// OrphanMitigation controls whether automatic orphan mitigation is on
+	// (without user intervention)
+	OrphanMitigation bool
+
 	// ReconciliationRetryDuration is the longest time to attempt reconciliation
 	// on a given resource before failing the reconciliation
 	ReconciliationRetryDuration time.Duration
