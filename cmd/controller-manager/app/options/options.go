@@ -83,6 +83,7 @@ func NewControllerManagerServer() *ControllerManagerServer {
 			LeaderElectionNamespace:                defaultLeaderElectionNamespace,
 			EnableProfiling:                        true,
 			EnableContentionProfiling:              false,
+			OrphanMitigation:                       true,
 			ReconciliationRetryDuration:            defaultReconciliationRetryDuration,
 			OperationPollingMaximumBackoffDuration: defaultOperationPollingMaximumBackoffDuration,
 			SecureServingOptions:                   genericoptions.NewSecureServingOptions(),
@@ -109,6 +110,7 @@ func (s *ControllerManagerServer) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&s.ServiceCatalogInsecureSkipVerify, "service-catalog-insecure-skip-verify", s.ServiceCatalogInsecureSkipVerify, "Skip verification of the TLS certificate for the service-catalog API server")
 	fs.DurationVar(&s.ResyncInterval, "resync-interval", s.ResyncInterval, "The interval on which the controller will resync its informers")
 	fs.DurationVar(&s.ServiceBrokerRelistInterval, "broker-relist-interval", s.ServiceBrokerRelistInterval, "The interval on which a broker's catalog is relisted after the broker becomes ready")
+	fs.BoolVar(&s.OrphanMitigation, "orphan-mitigation", s.OrphanMitigation, "Stop automatically mitigating orphan without user intervention (see OSB spec)")
 	fs.BoolVar(&s.OSBAPIContextProfile, "enable-osb-api-context-profile", s.OSBAPIContextProfile, "This does nothing.")
 	fs.MarkHidden("enable-osb-api-context-profile")
 	fs.StringVar(&s.OSBAPIPreferredVersion, "osb-api-preferred-version", s.OSBAPIPreferredVersion, "The string to send as the version header.")

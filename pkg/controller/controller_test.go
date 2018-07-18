@@ -1997,6 +1997,7 @@ func newTestController(t *testing.T, config fakeosb.FakeClientConfiguration) (
 		brokerClFunc,
 		24*time.Hour,
 		osb.LatestAPIVersion().HeaderValue(),
+		true,
 		fakeRecorder,
 		7*24*time.Hour,
 		7*24*time.Hour,
