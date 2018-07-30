@@ -1275,12 +1275,10 @@ func (c *controller) reconciliationRetryDurationExceeded(operationStartTime *met
 // shouldStartOrphanMitigation returns whether an error with the given status
 // code indicates that orphan migitation should start.
 func shouldStartOrphanMitigation(statusCode int) bool {
-	// TODO nilebox: This is a quick hack for migration story, the proper fix is tracked at https://github.com/kubernetes-incubator/service-catalog/issues/2242
-	return false
-	//is2XX := statusCode >= 200 && statusCode < 300
-	//is5XX := statusCode >= 500 && statusCode < 600
-	//
-	//return (is2XX && statusCode != http.StatusOK) || is5XX
+	is2XX := statusCode >= 200 && statusCode < 300
+	is5XX := statusCode >= 500 && statusCode < 600
+
+	return (is2XX && statusCode != http.StatusOK) || is5XX
 }
 
 // isRetriableHTTPStatus returns whether an error with the given HTTP status
