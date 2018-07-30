@@ -2532,172 +2532,173 @@ func TestReconcileServiceBindingWithSecretParameters(t *testing.T) {
 
 }
 
-// TestReconcileBindingWithSetOrphanMitigation tests
-// reconcileServiceBinding to ensure a binding properly initiates
-// orphan mitigation in the case of timeout or receiving certain HTTP codes.
-func TestReconcileBindingWithSetOrphanMitigation(t *testing.T) {
-	// Anonymous struct fields:
-	// bindReactionError: the error to return from the bind attempt
-	// setOrphanMitigation: flag for whether or not orphan migitation
-	//                      should be performed
-	cases := []struct {
-		name                string
-		bindReactionError   error
-		setOrphanMitigation bool
-		shouldReturnError   bool
-	}{
-		{
-			name:                "timeout error",
-			bindReactionError:   testTimeoutError{},
-			setOrphanMitigation: false,
-			shouldReturnError:   true,
-		},
-		{
-			name: "osb code 200",
-			bindReactionError: osb.HTTPStatusCodeError{
-				StatusCode: 200,
-			},
-			setOrphanMitigation: false,
-			shouldReturnError:   false,
-		},
-		{
-			name: "osb code 201",
-			bindReactionError: osb.HTTPStatusCodeError{
-				StatusCode: 201,
-			},
-			setOrphanMitigation: true,
-			shouldReturnError:   false,
-		},
-		{
-			name: "osb code 300",
-			bindReactionError: osb.HTTPStatusCodeError{
-				StatusCode: 300,
-			},
-			setOrphanMitigation: false,
-			shouldReturnError:   false,
-		},
-		{
-			name: "osb code 400",
-			bindReactionError: osb.HTTPStatusCodeError{
-				StatusCode: 400,
-			},
-			setOrphanMitigation: false,
-			shouldReturnError:   false,
-		},
-		{
-			name: "osb code 408",
-			bindReactionError: osb.HTTPStatusCodeError{
-				StatusCode: 408,
-			},
-			setOrphanMitigation: false,
-			shouldReturnError:   false,
-		},
-		{
-			name: "osb code 500",
-			bindReactionError: osb.HTTPStatusCodeError{
-				StatusCode: 500,
-			},
-			setOrphanMitigation: true,
-			shouldReturnError:   false,
-		},
-		{
-			name: "osb code 501",
-			bindReactionError: osb.HTTPStatusCodeError{
-				StatusCode: 501,
-			},
-			setOrphanMitigation: true,
-			shouldReturnError:   false,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			fakeKubeClient, fakeCatalogClient, fakeServiceBrokerClient, testController, sharedInformers := newTestController(t, fakeosb.FakeClientConfiguration{
-				BindReaction: &fakeosb.BindReaction{
-					Response: &osb.BindResponse{},
-					Error:    tc.bindReactionError,
-				},
-			})
-
-			addGetNamespaceReaction(fakeKubeClient)
-			// existing Secret with nil controllerRef
-			addGetSecretReaction(fakeKubeClient, &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: testServiceBindingName, Namespace: testNamespace},
-			})
-
-			sharedInformers.ClusterServiceBrokers().Informer().GetStore().Add(getTestClusterServiceBroker())
-			sharedInformers.ClusterServiceClasses().Informer().GetStore().Add(getTestClusterServiceClass())
-			sharedInformers.ClusterServicePlans().Informer().GetStore().Add(getTestClusterServicePlan())
-			sharedInformers.ServiceInstances().Informer().GetStore().Add(getTestServiceInstanceWithStatus(v1beta1.ConditionTrue))
-
-			binding := &v1beta1.ServiceBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       testServiceBindingName,
-					Namespace:  testNamespace,
-					Generation: 1,
-				},
-				Spec: v1beta1.ServiceBindingSpec{
-					ServiceInstanceRef: v1beta1.LocalObjectReference{Name: testServiceInstanceName},
-					ExternalID:         testServiceBindingGUID,
-					SecretName:         testServiceBindingSecretName,
-				},
-				Status: v1beta1.ServiceBindingStatus{
-					UnbindStatus: v1beta1.ServiceBindingUnbindStatusNotRequired,
-				},
-			}
-			startTime := metav1.NewTime(time.Now().Add(-7 * 24 * time.Hour))
-			binding.Status.OperationStartTime = &startTime
-
-			if err := reconcileServiceBinding(t, testController, binding); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			binding = assertServiceBindingBindInProgressIsTheOnlyCatalogAction(t, fakeCatalogClient, binding)
-			assertServiceBindingReadyFalse(t, binding)
-			fakeCatalogClient.ClearActions()
-
-			assertGetNamespaceAction(t, fakeKubeClient.Actions())
-			fakeKubeClient.ClearActions()
-
-			assertNumberOfBrokerActions(t, fakeServiceBrokerClient.Actions(), 0)
-
-			if err := reconcileServiceBinding(t, testController, binding); tc.shouldReturnError && err == nil || !tc.shouldReturnError && err != nil {
-				t.Fatalf("expected to return %v from reconciliation attempt, got %v", tc.shouldReturnError, err)
-			}
-
-			brokerActions := fakeServiceBrokerClient.Actions()
-			assertNumberOfBrokerActions(t, brokerActions, 1)
-			assertBind(t, brokerActions[0], &osb.BindRequest{
-				BindingID:  testServiceBindingGUID,
-				InstanceID: testServiceInstanceGUID,
-				ServiceID:  testClusterServiceClassGUID,
-				PlanID:     testClusterServicePlanGUID,
-				AppGUID:    strPtr(testNamespaceGUID),
-				BindResource: &osb.BindResource{
-					AppGUID: strPtr(testNamespaceGUID),
-				},
-			})
-
-			kubeActions := fakeKubeClient.Actions()
-			assertNumberOfActions(t, kubeActions, 1)
-			assertActionEquals(t, kubeActions[0], "get", "namespaces")
-
-			actions := fakeCatalogClient.Actions()
-			assertNumberOfActions(t, actions, 1)
-
-			updatedServiceBinding := assertUpdateStatus(t, actions[0], binding).(*v1beta1.ServiceBinding)
-
-			assertServiceBindingExternalPropertiesNil(t, updatedServiceBinding)
-
-			if tc.setOrphanMitigation {
-				assertServiceBindingStartingOrphanMitigation(t, updatedServiceBinding, binding)
-			} else {
-				assertServiceBindingReadyFalse(t, updatedServiceBinding)
-				assertServiceBindingCondition(t, updatedServiceBinding, v1beta1.ServiceBindingConditionReady, v1beta1.ConditionFalse)
-				assertServiceBindingOrphanMitigationSet(t, updatedServiceBinding, false)
-			}
-		})
-	}
-}
+// TODO nislamov: Revert once properly addressed in https://github.com/kubernetes-incubator/service-catalog/issues/2242
+//// TestReconcileBindingWithSetOrphanMitigation tests
+//// reconcileServiceBinding to ensure a binding properly initiates
+//// orphan mitigation in the case of timeout or receiving certain HTTP codes.
+//func TestReconcileBindingWithSetOrphanMitigation(t *testing.T) {
+//	// Anonymous struct fields:
+//	// bindReactionError: the error to return from the bind attempt
+//	// setOrphanMitigation: flag for whether or not orphan migitation
+//	//                      should be performed
+//	cases := []struct {
+//		name                string
+//		bindReactionError   error
+//		setOrphanMitigation bool
+//		shouldReturnError   bool
+//	}{
+//		{
+//			name:                "timeout error",
+//			bindReactionError:   testTimeoutError{},
+//			setOrphanMitigation: false,
+//			shouldReturnError:   true,
+//		},
+//		{
+//			name: "osb code 200",
+//			bindReactionError: osb.HTTPStatusCodeError{
+//				StatusCode: 200,
+//			},
+//			setOrphanMitigation: false,
+//			shouldReturnError:   false,
+//		},
+//		{
+//			name: "osb code 201",
+//			bindReactionError: osb.HTTPStatusCodeError{
+//				StatusCode: 201,
+//			},
+//			setOrphanMitigation: true,
+//			shouldReturnError:   false,
+//		},
+//		{
+//			name: "osb code 300",
+//			bindReactionError: osb.HTTPStatusCodeError{
+//				StatusCode: 300,
+//			},
+//			setOrphanMitigation: false,
+//			shouldReturnError:   false,
+//		},
+//		{
+//			name: "osb code 400",
+//			bindReactionError: osb.HTTPStatusCodeError{
+//				StatusCode: 400,
+//			},
+//			setOrphanMitigation: false,
+//			shouldReturnError:   false,
+//		},
+//		{
+//			name: "osb code 408",
+//			bindReactionError: osb.HTTPStatusCodeError{
+//				StatusCode: 408,
+//			},
+//			setOrphanMitigation: false,
+//			shouldReturnError:   false,
+//		},
+//		{
+//			name: "osb code 500",
+//			bindReactionError: osb.HTTPStatusCodeError{
+//				StatusCode: 500,
+//			},
+//			setOrphanMitigation: true,
+//			shouldReturnError:   false,
+//		},
+//		{
+//			name: "osb code 501",
+//			bindReactionError: osb.HTTPStatusCodeError{
+//				StatusCode: 501,
+//			},
+//			setOrphanMitigation: true,
+//			shouldReturnError:   false,
+//		},
+//	}
+//
+//	for _, tc := range cases {
+//		t.Run(tc.name, func(t *testing.T) {
+//			fakeKubeClient, fakeCatalogClient, fakeServiceBrokerClient, testController, sharedInformers := newTestController(t, fakeosb.FakeClientConfiguration{
+//				BindReaction: &fakeosb.BindReaction{
+//					Response: &osb.BindResponse{},
+//					Error:    tc.bindReactionError,
+//				},
+//			})
+//
+//			addGetNamespaceReaction(fakeKubeClient)
+//			// existing Secret with nil controllerRef
+//			addGetSecretReaction(fakeKubeClient, &corev1.Secret{
+//				ObjectMeta: metav1.ObjectMeta{Name: testServiceBindingName, Namespace: testNamespace},
+//			})
+//
+//			sharedInformers.ClusterServiceBrokers().Informer().GetStore().Add(getTestClusterServiceBroker())
+//			sharedInformers.ClusterServiceClasses().Informer().GetStore().Add(getTestClusterServiceClass())
+//			sharedInformers.ClusterServicePlans().Informer().GetStore().Add(getTestClusterServicePlan())
+//			sharedInformers.ServiceInstances().Informer().GetStore().Add(getTestServiceInstanceWithStatus(v1beta1.ConditionTrue))
+//
+//			binding := &v1beta1.ServiceBinding{
+//				ObjectMeta: metav1.ObjectMeta{
+//					Name:       testServiceBindingName,
+//					Namespace:  testNamespace,
+//					Generation: 1,
+//				},
+//				Spec: v1beta1.ServiceBindingSpec{
+//					ServiceInstanceRef: v1beta1.LocalObjectReference{Name: testServiceInstanceName},
+//					ExternalID:         testServiceBindingGUID,
+//					SecretName:         testServiceBindingSecretName,
+//				},
+//				Status: v1beta1.ServiceBindingStatus{
+//					UnbindStatus: v1beta1.ServiceBindingUnbindStatusNotRequired,
+//				},
+//			}
+//			startTime := metav1.NewTime(time.Now().Add(-7 * 24 * time.Hour))
+//			binding.Status.OperationStartTime = &startTime
+//
+//			if err := reconcileServiceBinding(t, testController, binding); err != nil {
+//				t.Fatalf("unexpected error: %v", err)
+//			}
+//			binding = assertServiceBindingBindInProgressIsTheOnlyCatalogAction(t, fakeCatalogClient, binding)
+//			assertServiceBindingReadyFalse(t, binding)
+//			fakeCatalogClient.ClearActions()
+//
+//			assertGetNamespaceAction(t, fakeKubeClient.Actions())
+//			fakeKubeClient.ClearActions()
+//
+//			assertNumberOfBrokerActions(t, fakeServiceBrokerClient.Actions(), 0)
+//
+//			if err := reconcileServiceBinding(t, testController, binding); tc.shouldReturnError && err == nil || !tc.shouldReturnError && err != nil {
+//				t.Fatalf("expected to return %v from reconciliation attempt, got %v", tc.shouldReturnError, err)
+//			}
+//
+//			brokerActions := fakeServiceBrokerClient.Actions()
+//			assertNumberOfBrokerActions(t, brokerActions, 1)
+//			assertBind(t, brokerActions[0], &osb.BindRequest{
+//				BindingID:  testServiceBindingGUID,
+//				InstanceID: testServiceInstanceGUID,
+//				ServiceID:  testClusterServiceClassGUID,
+//				PlanID:     testClusterServicePlanGUID,
+//				AppGUID:    strPtr(testNamespaceGUID),
+//				BindResource: &osb.BindResource{
+//					AppGUID: strPtr(testNamespaceGUID),
+//				},
+//			})
+//
+//			kubeActions := fakeKubeClient.Actions()
+//			assertNumberOfActions(t, kubeActions, 1)
+//			assertActionEquals(t, kubeActions[0], "get", "namespaces")
+//
+//			actions := fakeCatalogClient.Actions()
+//			assertNumberOfActions(t, actions, 1)
+//
+//			updatedServiceBinding := assertUpdateStatus(t, actions[0], binding).(*v1beta1.ServiceBinding)
+//
+//			assertServiceBindingExternalPropertiesNil(t, updatedServiceBinding)
+//
+//			if tc.setOrphanMitigation {
+//				assertServiceBindingStartingOrphanMitigation(t, updatedServiceBinding, binding)
+//			} else {
+//				assertServiceBindingReadyFalse(t, updatedServiceBinding)
+//				assertServiceBindingCondition(t, updatedServiceBinding, v1beta1.ServiceBindingConditionReady, v1beta1.ConditionFalse)
+//				assertServiceBindingOrphanMitigationSet(t, updatedServiceBinding, false)
+//			}
+//		})
+//	}
+//}
 
 // TestReconcileBindingWithOrphanMitigationInProgress tests
 // reconcileServiceBinding to ensure a binding is properly handled
