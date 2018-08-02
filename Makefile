@@ -334,7 +334,7 @@ clean-coverage:
 
 # Building Docker Images for our executables
 ############################################
-images: user-broker-image service-catalog-image healthcheck-image
+images: service-catalog-image
 
 images-all: $(addprefix arch-image-,$(ALL_ARCH))
 arch-image-%:
@@ -381,7 +381,7 @@ endif
 
 # Push our Docker Images to a registry
 ######################################
-push: user-broker-push service-catalog-push
+push: service-catalog-push
 
 user-broker-push: user-broker-image
 	docker push $(USER_BROKER_IMAGE)
