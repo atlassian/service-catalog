@@ -262,7 +262,8 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 	}
 
 	ok := false
-	//ctxKey := streamKeyFromCtx(ctx)
+	ctxKey := streamKeyFromCtx(ctx)
+	logger.Infof("etcdwatch: Watch ctxKey=%q", ctxKey)
 
 	// find or allocate appropriate grpc watch stream
 	w.mu.Lock()
@@ -273,12 +274,13 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 		close(ch)
 		return ch
 	}
-	// TODO nislamov: Undo after debugging
-	// wgs := w.streams[ctxKey]
-	var wgs *watchGrpcStream
+	wgs := w.streams[ctxKey]
 	if wgs == nil {
+		logger.Infof("etcdwatch: Creating new stream ctxKey=%q", ctxKey)
 		wgs = w.newWatcherGrpcStream(ctx)
-		//w.streams[ctxKey] = wgs
+		w.streams[ctxKey] = wgs
+	} else {
+		logger.Infof("etcdwatch: Found existing stream ctxKey=%q", ctxKey)
 	}
 	donec := wgs.donec
 	reqc := wgs.reqc
@@ -288,11 +290,14 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 	closeCh := make(chan WatchResponse, 1)
 
 	// submit request
+	logger.Info("etcdwatch: submit request")
 	select {
 	case reqc <- wr:
+		logger.Info("etcdwatch: reqc <- wr")
 		ok = true
 	case <-wr.ctx.Done():
 	case <-donec:
+		logger.Info("etcdwatch: ctx.Done() || donec")
 		if wgs.closeErr != nil {
 			closeCh <- WatchResponse{closeErr: wgs.closeErr}
 			break
@@ -302,12 +307,15 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 	}
 
 	// receive channel
+	logger.Info("etcdwatch: receive channel")
 	if ok {
 		select {
 		case ret := <-wr.retc:
+			logger.Info("etcdwatch: wr.retc")
 			return ret
 		case <-ctx.Done():
 		case <-donec:
+			logger.Info("etcdwatch: ctx.Done() || donec")
 			if wgs.closeErr != nil {
 				closeCh <- WatchResponse{closeErr: wgs.closeErr}
 				break
@@ -317,6 +325,7 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 		}
 	}
 
+	logger.Info("etcdwatch: close(closeCh)")
 	close(closeCh)
 	return closeCh
 }
@@ -346,9 +355,11 @@ func (w *watchGrpcStream) close() (err error) {
 
 func (w *watcher) closeStream(wgs *watchGrpcStream) {
 	w.mu.Lock()
+	logger.Info("etcdwatch: watcher closeStream, ctxKey=%q", wgs.ctxKey)
 	close(wgs.donec)
 	wgs.cancel()
 	if w.streams != nil {
+		logger.Info("etcdwatch: watcher closeStream, delete ctxKey=%q", wgs.ctxKey)
 		delete(w.streams, wgs.ctxKey)
 	}
 	w.mu.Unlock()
@@ -407,6 +418,12 @@ func (w *watchGrpcStream) run() {
 	closing := make(map[*watcherStream]struct{})
 
 	defer func() {
+		if closeErr != nil {
+			logger.Infof("etcdwatch: watchGrpcStream closeErr %q", closeErr)
+		} else {
+			logger.Info("etcdwatch: watchGrpcStream close")
+		}
+
 		w.closeErr = closeErr
 		// shutdown substreams and resuming substreams
 		for _, ws := range w.substreams {
@@ -429,6 +446,7 @@ func (w *watchGrpcStream) run() {
 		w.owner.closeStream(w)
 	}()
 
+	logger.Info("etcdwatch: start newWatchClient")
 	// start a stream with the etcd grpc server
 	if wc, closeErr = w.newWatchClient(); closeErr != nil {
 		return
@@ -440,6 +458,7 @@ func (w *watchGrpcStream) run() {
 		select {
 		// Watch() requested
 		case wreq := <-w.reqc:
+			logger.Info("etcdwatch: watch requested")
 			outc := make(chan WatchResponse, 1)
 			ws := &watcherStream{
 				initReq: *wreq,
@@ -461,8 +480,10 @@ func (w *watchGrpcStream) run() {
 			}
 		// New events from the watch client
 		case pbresp := <-w.respc:
+			logger.Info("etcdwatch: new events from the watch client")
 			switch {
 			case pbresp.Created:
+				logger.Info("etcdwatch: Created")
 				// response to head of queue creation
 				if ws := w.resuming[0]; ws != nil {
 					w.addSubstream(pbresp, ws)
@@ -473,6 +494,7 @@ func (w *watchGrpcStream) run() {
 					wc.Send(ws.initReq.toPB())
 				}
 			case pbresp.Canceled:
+				logger.Info("etcdwatch: Canceled")
 				delete(cancelSet, pbresp.WatchId)
 				if ws, ok := w.substreams[pbresp.WatchId]; ok {
 					// signal to stream goroutine to update closingc
@@ -480,6 +502,7 @@ func (w *watchGrpcStream) run() {
 					closing[ws] = struct{}{}
 				}
 			default:
+				logger.Info("etcdwatch: default")
 				// dispatch to appropriate watch stream
 				if ok := w.dispatchEvent(pbresp); ok {
 					break
@@ -499,6 +522,7 @@ func (w *watchGrpcStream) run() {
 			}
 		// watch client failed on Recv; spawn another if possible
 		case err := <-w.errc:
+			logger.Info("etcdwatch: watch client failed on Recv; spawn another if possible")
 			if isHaltErr(w.ctx, err) || toErr(w.ctx, err) == v3rpc.ErrNoLeader {
 				closeErr = err
 				return
@@ -511,8 +535,10 @@ func (w *watchGrpcStream) run() {
 			}
 			cancelSet = make(map[int64]struct{})
 		case <-w.ctx.Done():
+			logger.Info("etcdwatch: ctx.Done")
 			return
 		case ws := <-w.closingc:
+			logger.Info("w.closingc")
 			w.closeSubstream(ws)
 			delete(closing, ws)
 			if len(w.substreams)+len(w.resuming) == 0 {

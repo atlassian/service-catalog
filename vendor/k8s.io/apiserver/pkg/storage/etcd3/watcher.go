@@ -190,6 +190,7 @@ func (wc *watchChan) sync() error {
 // - watch on given key and send events to process.
 func (wc *watchChan) startWatching(watchClosedCh chan struct{}) {
 	if wc.initialRev == 0 {
+		glog.Info("apiwatcher: wc.sync")
 		if err := wc.sync(); err != nil {
 			glog.Errorf("failed to sync with latest state: %v", err)
 			wc.sendError(err)
@@ -200,6 +201,7 @@ func (wc *watchChan) startWatching(watchClosedCh chan struct{}) {
 	if wc.recursive {
 		opts = append(opts, clientv3.WithPrefix())
 	}
+	glog.Info("apiwatcher: client.Watch")
 	wch := wc.watcher.client.Watch(wc.ctx, wc.key, opts...)
 	for wres := range wch {
 		if wres.Err() != nil {
@@ -210,6 +212,7 @@ func (wc *watchChan) startWatching(watchClosedCh chan struct{}) {
 			return
 		}
 		for _, e := range wres.Events {
+			glog.Infof("apiwatcher: sendEvent: %q", e.Kv.Key)
 			wc.sendEvent(parseEvent(e))
 		}
 	}
@@ -217,6 +220,7 @@ func (wc *watchChan) startWatching(watchClosedCh chan struct{}) {
 	// e.g. cancel the context, close the client.
 	// If this watch chan is broken and context isn't cancelled, other goroutines will still hang.
 	// We should notify the main thread that this goroutine has exited.
+	glog.Info("apiwatcher: close(watchClosedCh)")
 	close(watchClosedCh)
 }
 

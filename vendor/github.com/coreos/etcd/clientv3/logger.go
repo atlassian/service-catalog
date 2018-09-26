@@ -15,7 +15,8 @@
 package clientv3
 
 import (
-	"io/ioutil"
+	//"io/ioutil"
+	"os"
 	"sync"
 
 	"google.golang.org/grpc/grpclog"
@@ -37,7 +38,9 @@ type settableLogger struct {
 func init() {
 	// disable client side logs by default
 	logger.mu.Lock()
-	logger.l = grpclog.NewLoggerV2(ioutil.Discard, ioutil.Discard, ioutil.Discard)
+	//logger.l = grpclog.NewLoggerV2(ioutil.Discard, ioutil.Discard, ioutil.Discard)
+	// TODO nislamov: revert
+	logger.l = grpclog.NewLoggerV2(os.Stdout, os.Stdout, os.Stderr)
 
 	// logger has to override the grpclog at initialization so that
 	// any changes to the grpclog go through logger with locking
