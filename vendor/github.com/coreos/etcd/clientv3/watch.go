@@ -262,7 +262,7 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 	}
 
 	ok := false
-	ctxKey := streamKeyFromCtx(ctx)
+	//ctxKey := streamKeyFromCtx(ctx)
 
 	// find or allocate appropriate grpc watch stream
 	w.mu.Lock()
@@ -273,10 +273,12 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 		close(ch)
 		return ch
 	}
-	wgs := w.streams[ctxKey]
+	// TODO nislamov: Undo after debugging
+	// wgs := w.streams[ctxKey]
+	var wgs *watchGrpcStream
 	if wgs == nil {
 		wgs = w.newWatcherGrpcStream(ctx)
-		w.streams[ctxKey] = wgs
+		//w.streams[ctxKey] = wgs
 	}
 	donec := wgs.donec
 	reqc := wgs.reqc
