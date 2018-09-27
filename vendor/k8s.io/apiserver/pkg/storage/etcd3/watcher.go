@@ -180,7 +180,7 @@ func (wc *watchChan) sync() error {
 	}
 	wc.initialRev = getResp.Header.Revision
 	for _, kv := range getResp.Kvs {
-		glog.Infof("apiwatcher: sendEvent from sync: %q", e.Kv.Key)
+		glog.Infof("apiwatcher: sendEvent from sync: %q", kv.Key)
 		wc.sendEvent(parseKV(kv))
 	}
 	return nil

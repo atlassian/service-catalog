@@ -385,7 +385,7 @@ func (w *watchGrpcStream) addSubstream(resp *pb.WatchResponse, ws *watcherStream
 }
 
 func (w *watchGrpcStream) sendCloseSubstream(ws *watcherStream, resp *WatchResponse) {
-	logger.Infof("etcdwatch id=%d, sendCloseSubstream() WatchId=%d", w.fakeID, resp.WatchId)
+	logger.Infof("etcdwatch id=%d, sendCloseSubstream()", w.fakeID)
 	select {
 	case ws.outc <- *resp:
 	case <-ws.initReq.ctx.Done():
@@ -395,7 +395,7 @@ func (w *watchGrpcStream) sendCloseSubstream(ws *watcherStream, resp *WatchRespo
 }
 
 func (w *watchGrpcStream) closeSubstream(ws *watcherStream) {
-	logger.Infof("etcdwatch id=%d, closeSubstream() WatchId=%d", w.fakeID, resp.WatchId)
+	logger.Infof("etcdwatch id=%d, closeSubstream()", w.fakeID)
 	// send channel response in case stream was never established
 	select {
 	case ws.initReq.retc <- ws.outc:
@@ -554,8 +554,29 @@ func (w *watchGrpcStream) run() {
 			w.closeSubstream(ws)
 			delete(closing, ws)
 			if len(w.substreams)+len(w.resuming) == 0 {
+				logger.Infof("etcdwatch id=%d: shutdown", w.fakeID)
 				// no more watchers on this stream, shutdown
 				return
+			} else {
+				logger.Infof("etcdwatch id=%d: w.substreams=%d, w.resuming=%d", w.fakeID, len(w.substreams), len(w.resuming))
+				var substreamKeys string
+				nilSubstreams :=0
+				for k, v := range w.substreams {
+					substreamKeys = substreamKeys + fmt.Sprintf("%d, ", k)
+					if v == nil {
+						nilSubstreams++
+					}
+				}
+				var resumingKeys string
+				nilResuming :=0
+				for k, v := range w.resuming {
+					resumingKeys = resumingKeys + fmt.Sprintf("%d, ", k)
+					if v == nil {
+						nilResuming++
+					}
+				}
+				logger.Infof("etcdwatch id=%d: nilSubstreams=%d, nilResuming=%d", w.fakeID, nilSubstreams, nilResuming)
+				logger.Infof("etcdwatch id=%d: substreamKeys=%s, resumingKeys=%s", w.fakeID, substreamKeys, resumingKeys)
 			}
 		}
 	}
