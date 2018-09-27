@@ -116,8 +116,11 @@ type watcher struct {
 	streams map[string]*watchGrpcStream
 }
 
+var idCounter int64 = 0
+
 // watchGrpcStream tracks all watch resources attached to a single grpc stream.
 type watchGrpcStream struct {
+	fakeID int64
 	owner    *watcher
 	remote   pb.WatchClient
 	callOpts []grpc.CallOption
@@ -218,7 +221,9 @@ func (vc *valCtx) Err() error                  { return nil }
 
 func (w *watcher) newWatcherGrpcStream(inctx context.Context) *watchGrpcStream {
 	ctx, cancel := context.WithCancel(&valCtx{inctx})
+	idCounter = idCounter + 1
 	wgs := &watchGrpcStream{
+		fakeID: idCounter,
 		owner:      w,
 		remote:     w.remote,
 		callOpts:   w.callOpts,
@@ -278,10 +283,12 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 	if wgs == nil {
 		logger.Infof("etcdwatch: Creating new stream ctxKey=%q", ctxKey)
 		wgs = w.newWatcherGrpcStream(ctx)
+		logger.Infof("etcdwatch id=%d: Created new stream ctxKey=%q", wgs.fakeID, ctxKey)
 		w.streams[ctxKey] = wgs
 	} else {
-		logger.Infof("etcdwatch: Found existing stream ctxKey=%q", ctxKey)
+		logger.Infof("etcdwatch id=%d: Found existing stream ctxKey=%q", wgs.fakeID, ctxKey)
 	}
+	logger.Infof("etcdwatch id=%d: Using a stream", wgs.fakeID)
 	donec := wgs.donec
 	reqc := wgs.reqc
 	w.mu.Unlock()
@@ -290,14 +297,14 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 	closeCh := make(chan WatchResponse, 1)
 
 	// submit request
-	logger.Info("etcdwatch: submit request")
+	logger.Infof("etcdwatch id=%d: submit request", wgs.fakeID)
 	select {
 	case reqc <- wr:
-		logger.Info("etcdwatch: reqc <- wr")
+		logger.Infof("etcdwatch id=%d: reqc <- wr", wgs.fakeID)
 		ok = true
 	case <-wr.ctx.Done():
 	case <-donec:
-		logger.Info("etcdwatch: ctx.Done() || donec")
+		logger.Infof("etcdwatch id=%d: ctx.Done() || donec", wgs.fakeID)
 		if wgs.closeErr != nil {
 			closeCh <- WatchResponse{closeErr: wgs.closeErr}
 			break
@@ -307,15 +314,15 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 	}
 
 	// receive channel
-	logger.Info("etcdwatch: receive channel")
+	logger.Infof("etcdwatch id=%d: receive channel", wgs.fakeID)
 	if ok {
 		select {
 		case ret := <-wr.retc:
-			logger.Info("etcdwatch: wr.retc")
+			logger.Infof("etcdwatch id=%d: wr.retc", wgs.fakeID)
 			return ret
 		case <-ctx.Done():
 		case <-donec:
-			logger.Info("etcdwatch: ctx.Done() || donec")
+			logger.Infof("etcdwatch id=%d: ctx.Done() || donec", wgs.fakeID)
 			if wgs.closeErr != nil {
 				closeCh <- WatchResponse{closeErr: wgs.closeErr}
 				break
@@ -325,7 +332,7 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 		}
 	}
 
-	logger.Info("etcdwatch: close(closeCh)")
+	logger.Infof("etcdwatch id=%d: close(closeCh)", wgs.fakeID)
 	close(closeCh)
 	return closeCh
 }
@@ -344,6 +351,7 @@ func (w *watcher) Close() (err error) {
 }
 
 func (w *watchGrpcStream) close() (err error) {
+	logger.Infof("etcdwatch id=%d, close()", w.fakeID)
 	w.cancel()
 	<-w.donec
 	select {
@@ -355,17 +363,18 @@ func (w *watchGrpcStream) close() (err error) {
 
 func (w *watcher) closeStream(wgs *watchGrpcStream) {
 	w.mu.Lock()
-	logger.Info("etcdwatch: watcher closeStream, ctxKey=%q", wgs.ctxKey)
+	logger.Infof("etcdwatch id=%d: watcher closeStream, ctxKey=%q", wgs.fakeID, wgs.ctxKey)
 	close(wgs.donec)
 	wgs.cancel()
 	if w.streams != nil {
-		logger.Info("etcdwatch: watcher closeStream, delete ctxKey=%q", wgs.ctxKey)
+		logger.Infof("etcdwatch id=%d: watcher closeStream, delete ctxKey=%q", wgs.fakeID, wgs.ctxKey)
 		delete(w.streams, wgs.ctxKey)
 	}
 	w.mu.Unlock()
 }
 
 func (w *watchGrpcStream) addSubstream(resp *pb.WatchResponse, ws *watcherStream) {
+	logger.Infof("etcdwatch id=%d, addSubstream() WatchId=%d", w.fakeID, resp.WatchId)
 	if resp.WatchId == -1 {
 		// failed; no channel
 		close(ws.recvc)
@@ -376,6 +385,7 @@ func (w *watchGrpcStream) addSubstream(resp *pb.WatchResponse, ws *watcherStream
 }
 
 func (w *watchGrpcStream) sendCloseSubstream(ws *watcherStream, resp *WatchResponse) {
+	logger.Infof("etcdwatch id=%d, sendCloseSubstream() WatchId=%d", w.fakeID, resp.WatchId)
 	select {
 	case ws.outc <- *resp:
 	case <-ws.initReq.ctx.Done():
@@ -385,6 +395,7 @@ func (w *watchGrpcStream) sendCloseSubstream(ws *watcherStream, resp *WatchRespo
 }
 
 func (w *watchGrpcStream) closeSubstream(ws *watcherStream) {
+	logger.Infof("etcdwatch id=%d, closeSubstream() WatchId=%d", w.fakeID, resp.WatchId)
 	// send channel response in case stream was never established
 	select {
 	case ws.initReq.retc <- ws.outc:
@@ -410,6 +421,7 @@ func (w *watchGrpcStream) closeSubstream(ws *watcherStream) {
 
 // run is the root of the goroutines for managing a watcher client
 func (w *watchGrpcStream) run() {
+	logger.Infof("etcdwatch id=%d, run()", w.fakeID)
 	var wc pb.Watch_WatchClient
 	var closeErr error
 
@@ -419,9 +431,9 @@ func (w *watchGrpcStream) run() {
 
 	defer func() {
 		if closeErr != nil {
-			logger.Infof("etcdwatch: watchGrpcStream closeErr %q", closeErr)
+			logger.Infof("etcdwatch id=%d: watchGrpcStream closeErr %q", w.fakeID, closeErr)
 		} else {
-			logger.Info("etcdwatch: watchGrpcStream close")
+			logger.Infof("etcdwatch id=%d: watchGrpcStream close", w.fakeID)
 		}
 
 		w.closeErr = closeErr
@@ -446,7 +458,7 @@ func (w *watchGrpcStream) run() {
 		w.owner.closeStream(w)
 	}()
 
-	logger.Info("etcdwatch: start newWatchClient")
+	logger.Infof("etcdwatch id=%d: start newWatchClient", w.fakeID)
 	// start a stream with the etcd grpc server
 	if wc, closeErr = w.newWatchClient(); closeErr != nil {
 		return
@@ -458,7 +470,7 @@ func (w *watchGrpcStream) run() {
 		select {
 		// Watch() requested
 		case wreq := <-w.reqc:
-			logger.Info("etcdwatch: watch requested")
+			logger.Infof("etcdwatch id=%d: watch requested", w.fakeID)
 			outc := make(chan WatchResponse, 1)
 			ws := &watcherStream{
 				initReq: *wreq,
@@ -480,10 +492,10 @@ func (w *watchGrpcStream) run() {
 			}
 		// New events from the watch client
 		case pbresp := <-w.respc:
-			logger.Info("etcdwatch: new events from the watch client")
+			logger.Infof("etcdwatch id=%d: new events from the watch client", w.fakeID)
 			switch {
 			case pbresp.Created:
-				logger.Info("etcdwatch: Created")
+				logger.Infof("etcdwatch id=%d: Created", w.fakeID)
 				// response to head of queue creation
 				if ws := w.resuming[0]; ws != nil {
 					w.addSubstream(pbresp, ws)
@@ -494,7 +506,7 @@ func (w *watchGrpcStream) run() {
 					wc.Send(ws.initReq.toPB())
 				}
 			case pbresp.Canceled:
-				logger.Info("etcdwatch: Canceled")
+				logger.Infof("etcdwatch id=%d: Canceled", w.fakeID)
 				delete(cancelSet, pbresp.WatchId)
 				if ws, ok := w.substreams[pbresp.WatchId]; ok {
 					// signal to stream goroutine to update closingc
@@ -502,7 +514,7 @@ func (w *watchGrpcStream) run() {
 					closing[ws] = struct{}{}
 				}
 			default:
-				logger.Info("etcdwatch: default")
+				logger.Infof("etcdwatch id=%d: default", w.fakeID)
 				// dispatch to appropriate watch stream
 				if ok := w.dispatchEvent(pbresp); ok {
 					break
@@ -522,7 +534,7 @@ func (w *watchGrpcStream) run() {
 			}
 		// watch client failed on Recv; spawn another if possible
 		case err := <-w.errc:
-			logger.Info("etcdwatch: watch client failed on Recv; spawn another if possible")
+			logger.Infof("etcdwatch id=%d: watch client failed on Recv; spawn another if possible", w.fakeID)
 			if isHaltErr(w.ctx, err) || toErr(w.ctx, err) == v3rpc.ErrNoLeader {
 				closeErr = err
 				return
@@ -535,10 +547,10 @@ func (w *watchGrpcStream) run() {
 			}
 			cancelSet = make(map[int64]struct{})
 		case <-w.ctx.Done():
-			logger.Info("etcdwatch: ctx.Done")
+			logger.Infof("etcdwatch id=%d: ctx.Done", w.fakeID)
 			return
 		case ws := <-w.closingc:
-			logger.Info("w.closingc")
+			logger.Infof("etcdwatch id=%d: w.closingc", w.fakeID)
 			w.closeSubstream(ws)
 			delete(closing, ws)
 			if len(w.substreams)+len(w.resuming) == 0 {
@@ -552,6 +564,7 @@ func (w *watchGrpcStream) run() {
 // nextResume chooses the next resuming to register with the grpc stream. Abandoned
 // streams are marked as nil in the queue since the head must wait for its inflight registration.
 func (w *watchGrpcStream) nextResume() *watcherStream {
+	logger.Infof("etcdwatch id=%d, nextResume()", w.fakeID)
 	for len(w.resuming) != 0 {
 		if w.resuming[0] != nil {
 			return w.resuming[0]
@@ -563,6 +576,7 @@ func (w *watchGrpcStream) nextResume() *watcherStream {
 
 // dispatchEvent sends a WatchResponse to the appropriate watcher stream
 func (w *watchGrpcStream) dispatchEvent(pbresp *pb.WatchResponse) bool {
+	logger.Infof("etcdwatch id=%d, dispatchEvent() WatchId=%d", w.fakeID, pbresp.WatchId)
 	events := make([]*Event, len(pbresp.Events))
 	for i, ev := range pbresp.Events {
 		events[i] = (*Event)(ev)
@@ -589,6 +603,7 @@ func (w *watchGrpcStream) dispatchEvent(pbresp *pb.WatchResponse) bool {
 
 // serveWatchClient forwards messages from the grpc stream to run()
 func (w *watchGrpcStream) serveWatchClient(wc pb.Watch_WatchClient) {
+	logger.Infof("etcdwatch id=%d, serveWatchClient()", w.fakeID)
 	for {
 		resp, err := wc.Recv()
 		if err != nil {
@@ -608,6 +623,7 @@ func (w *watchGrpcStream) serveWatchClient(wc pb.Watch_WatchClient) {
 
 // serveSubstream forwards watch responses from run() to the subscriber
 func (w *watchGrpcStream) serveSubstream(ws *watcherStream, resumec chan struct{}) {
+	logger.Infof("etcdwatch id=%d, serveSubstream()", w.fakeID)
 	if ws.closing {
 		panic("created substream goroutine but substream is closing")
 	}
@@ -704,6 +720,7 @@ func (w *watchGrpcStream) serveSubstream(ws *watcherStream, resumec chan struct{
 }
 
 func (w *watchGrpcStream) newWatchClient() (pb.Watch_WatchClient, error) {
+	logger.Infof("etcdwatch id=%d, newWatchClient()", w.fakeID)
 	// mark all substreams as resuming
 	close(w.resumec)
 	w.resumec = make(chan struct{})
@@ -750,6 +767,7 @@ func (w *watchGrpcStream) newWatchClient() (pb.Watch_WatchClient, error) {
 }
 
 func (w *watchGrpcStream) waitCancelSubstreams(stopc <-chan struct{}) <-chan struct{} {
+	logger.Infof("etcdwatch id=%d, waitCancelSubstreams()", w.fakeID)
 	var wg sync.WaitGroup
 	wg.Add(len(w.resuming))
 	donec := make(chan struct{})
@@ -787,6 +805,7 @@ func (w *watchGrpcStream) waitCancelSubstreams(stopc <-chan struct{}) <-chan str
 
 // joinSubstreams waits for all substream goroutines to complete.
 func (w *watchGrpcStream) joinSubstreams() {
+	logger.Infof("etcdwatch id=%d, joinSubstreams()", w.fakeID)
 	for _, ws := range w.substreams {
 		<-ws.donec
 	}
@@ -801,6 +820,7 @@ func (w *watchGrpcStream) joinSubstreams() {
 // manually retry in case "ws==nil && err==nil"
 // TODO: remove FailFast=false
 func (w *watchGrpcStream) openWatchClient() (ws pb.Watch_WatchClient, err error) {
+	logger.Infof("etcdwatch id=%d, openWatchClient()", w.fakeID)
 	for {
 		select {
 		case <-w.ctx.Done():
