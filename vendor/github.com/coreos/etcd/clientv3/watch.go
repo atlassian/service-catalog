@@ -553,7 +553,7 @@ func (w *watchGrpcStream) run() {
 			logger.Infof("etcdwatch id=%d: w.closingc", w.fakeID)
 			w.closeSubstream(ws)
 			delete(closing, ws)
-			if len(w.substreams)+len(w.resuming) == 0 {
+			if len(w.substreams) == 0 && !w.hasResumingWatchers() {
 				logger.Infof("etcdwatch id=%d: shutdown", w.fakeID)
 				// no more watchers on this stream, shutdown
 				return
@@ -580,6 +580,17 @@ func (w *watchGrpcStream) run() {
 			}
 		}
 	}
+}
+
+// hasResumingWatchers checks if there are any non-nil watchers in the
+// resume queue.
+func (w *watchGrpcStream) hasResumingWatchers() bool {
+	for _, ws := range w.resuming {
+		if ws != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // nextResume chooses the next resuming to register with the grpc stream. Abandoned
