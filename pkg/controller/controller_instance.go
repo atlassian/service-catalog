@@ -2292,21 +2292,33 @@ func (c *controller) prepareUpdateInstanceRequest(instance *v1beta1.ServiceInsta
 			OriginatingIdentity: rh.originatingIdentity,
 		}
 
-		// Only send the plan ID if the plan ID has changed from what the Broker has
-		if instance.Status.ExternalProperties == nil ||
-			servicePlan.Spec.ExternalID != instance.Status.ExternalProperties.ClusterServicePlanExternalID {
-			planID := servicePlan.Spec.ExternalID
-			request.PlanID = &planID
+		//// Only send the plan ID if the plan ID has changed from what the Broker has
+		//if instance.Status.ExternalProperties == nil ||
+		//	servicePlan.Spec.ExternalID != instance.Status.ExternalProperties.ClusterServicePlanExternalID {
+		//	planID := servicePlan.Spec.ExternalID
+		//	request.PlanID = &planID
+		//}
+		//// Only send the parameters if they have changed from what the Broker has
+		//if instance.Status.ExternalProperties == nil ||
+		//	rh.inProgressProperties.ParametersChecksum != instance.Status.ExternalProperties.ParametersChecksum {
+		//	if rh.parameters != nil {
+		//		request.Parameters = rh.parameters
+		//	} else {
+		//		request.Parameters = make(map[string]interface{})
+		//	}
+		//}
+
+		///////// TODO: this is a temporary hack to always send planID and parametes
+		// TODO Only send the plan ID if the plan ID has changed from what the Broker has
+		planID := servicePlan.Spec.ExternalID
+		request.PlanID = &planID
+		// TODO Only send the parameters if they have changed from what the Broker has
+		if rh.parameters != nil {
+			request.Parameters = rh.parameters
+		} else {
+			request.Parameters = make(map[string]interface{})
 		}
-		// Only send the parameters if they have changed from what the Broker has
-		if instance.Status.ExternalProperties == nil ||
-			rh.inProgressProperties.ParametersChecksum != instance.Status.ExternalProperties.ParametersChecksum {
-			if rh.parameters != nil {
-				request.Parameters = rh.parameters
-			} else {
-				request.Parameters = make(map[string]interface{})
-			}
-		}
+		///////// TODO: above is a temporary hack to always send planID and parametes
 
 	} else if instance.Spec.ServiceClassSpecified() {
 		serviceClass, servicePlan, _, _, err := c.getServiceClassPlanAndServiceBroker(instance)
